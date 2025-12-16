@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chú Bộ Đội Vượt Núi Rừng - Gặp Bác Hồ</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
+        
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: #e0f2f1; 
+            font-family: 'Arial', sans-serif;
+        }
+        
+        #gameCanvas {
+            width: 90vw; 
+            height: 45vw; 
+            max-width: 1200px; 
+            max-height: 600px;
+            
+            border: 4px solid #4a148c; 
+            background-color: #a5d6a7; 
+            display: block; 
+            box-sizing: border-box;
+        }
+        
+        #game-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            z-index: 10;
+        }
+
+        #controls {
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: #4a148c;
+        }
+
+        #game-over-screen, #win-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2.5em;
+            text-align: center;
+            z-index: 100; 
+        }
+
+        #game-over-screen button, #win-screen button {
+            padding: 15px 30px;
+            margin-top: 20px;
+            font-size: 1em;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        
+        #game-over-screen button:hover, #win-screen button:hover {
+            background-color: #45a049;
+        }
+        
+        #win-screen img {
+            max-width: 200px; 
+            height: auto;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-info">
+        Điểm: <span id="currentScore">0</span>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="controls">
+        Nhấn **SPACE** hoặc **Mũi tên lên** để nhảy!
+    </div>
+    
+    <div id="game-over-screen">
+        <div id="game-over-message"></div>
+        <button onclick="startGame()">Chơi Lại</button>
+    </div>
+
+    <div id="win-screen">
+        <img id="hoChiMinhWinImage" src="" alt="Bác Hồ">
+        <div id="win-message"></div>
+        <button onclick="startGame()">Chơi Lại</button>
+    </div>
+
+    <audio id="bgMusic" loop></audio>
+
+    <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('currentScore');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const gameOverMessage = document.getElementById('game-over-message');
+    const winScreen = document.getElementById('win-screen');
+    const winMessage = document.getElementById('win-message');
+    const hoChiMinhWinImage = document.getElementById('hoChiMinhWinImage');
+    const bgMusic = document.getElementById('bgMusic');
+
+    function setupCanvasDimensions() {
+        const style = window.getComputedStyle(canvas);
+        const width = parseInt(style.width, 10);
+        const height = parseInt(style.height, 10);
+
+        canvas.width = width;
+        canvas.height = height;
+
+        // Cập nhật lại vị trí groundY cho chú bộ đội dựa trên kích thước mới
+        soldier.groundY = canvas.height - soldier.height - 10; // Giảm 10 pixel để không bị sát đáy quá
+        soldier.y = soldier.groundY; 
+    }
+    
+    const IMAGE_SOURCES = {
+        soldier: 'assets/soldier.png', 
+        obstacle: 'assets/rock.png', 
+        bird: 'assets/bird.png',     
+        hochiminh: 'assets/bac_ho.png', 
+        star: 'assets/star.png', 
+        background: 'assets/forest.jpg',
+        music: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
+    };
+    
+    const IMAGES = {};
+    let resourcesLoaded = 0;
+    
+    const totalResources = Object.keys(IMAGE_SOURCES).length; 
+
+    function loadResources() {
+        return new Promise((resolve) => {
+            bgMusic.src = IMAGE_SOURCES.music;
+            hoChiMinhWinImage.src = IMAGE_SOURCES.hochiminh; 
+
+            for (let key in IMAGE_SOURCES) {
+                if (key !== 'music') {
+                    IMAGES[key] = new Image();
+                    IMAGES[key].onload = () => {
+                        resourcesLoaded++;
+                        if (resourcesLoaded === totalResources - 1) { 
+                            resolve(); 
+                        }
+                    };
+                    IMAGES[key].onerror = () => {
+                        console.error("Không thể tải tài nguyên:", IMAGE_SOURCES[key]);
+                        IMAGES[key].failed = true; 
+                        resourcesLoaded++;
+                        if (resourcesLoaded === totalResources - 1) {
+                            resolve();
+                        }
+                    }
+                    IMAGES[key].src = IMAGE_SOURCES[key];
+                }
+            }
+        });
+    }
+
+    
+    let soldier = {
+        x: 50,
+        y: 0, 
+        width: 65, 
+        height: 90, 
+        isJumping: false,
+        yVelocity: 0,
+        gravity: 1.5,
+        jumpStrength: 25,
+        groundY: 0 
+    };
+
+    let obstacles = [];
+    let score = 0;
+    let gameSpeed = 5;
+    let isRunning = false;
+    let animationFrameId;
+    let obstacleTimer = 0;
+    
+    const OBSTACLE_INTERVAL = 1200; 
+    const MIN_OBSTACLE_HEIGHT = 30;
+    const MAX_OBSTACLE_HEIGHT = 70;
+    
+    const OBSTACLE_TYPES = ['ground', 'air', 'star', 'large_rock']; 
+    const MIN_WINNING_SCORE = 500; 
+    const MAX_WINNING_SCORE = 800; 
+    let currentWinningScore = 0; 
+    let lastObstacleType = null; 
+    let gapLength = 0; 
+    let minGap = 200; 
+    let maxGap = 350; 
+    function drawSoldier() {
+        if (IMAGES.soldier && !IMAGES.soldier.failed) {
+            ctx.drawImage(IMAGES.soldier, soldier.x, soldier.y, soldier.width, soldier.height);
+        } else {
+            ctx.fillStyle = '#1b5e20';
+            ctx.fillRect(soldier.x, soldier.y, soldier.width, soldier.height);
+        }
+    }
+    function drawObstacle(obs) {
+        
+        if (obs.type === 'air') {
+            if (IMAGES.bird && !IMAGES.bird.failed) {
+                ctx.drawImage(IMAGES.bird, obs.x, obs.y, obs.width, obs.height);
+            } else {
+                ctx.fillStyle = 'blue'; 
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            }
+        } else if (obs.type === 'ground' || obs.type === 'large_rock') { 
+            if (IMAGES.obstacle && !IMAGES.obstacle.failed) {
+                ctx.drawImage(IMAGES.obstacle, obs.x, obs.y, obs.width, obs.height);
+            } else {
+                ctx.fillStyle = obs.type === 'large_rock' ? 'darkred' : 'brown'; 
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            }
+        } else if (obs.type === 'star') {
+            if (IMAGES.star && !IMAGES.star.failed) {
+                ctx.drawImage(IMAGES.star, obs.x, obs.y, obs.width, obs.height);
+            } else {
+                ctx.fillStyle = 'yellow'; 
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            }
+        }
+        
+    }
+    function drawBackground() {
+          if (IMAGES.background && !IMAGES.background.failed) {
+              ctx.drawImage(IMAGES.background, 0, 0, canvas.width, canvas.height);
+          } else {
+              ctx.fillStyle = '#81c784'; 
+              ctx.fillRect(0, 0, canvas.width, canvas.height - 30);
+              ctx.fillStyle = '#388e3c'; 
+              ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
+          }
+    }
+    function update() {
+        if (!isRunning) return;
+        if (score >= currentWinningScore) { 
+            winGame();
+            return;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);   
+        drawBackground();
+        if (soldier.isJumping) {
+            soldier.yVelocity += soldier.gravity;
+            soldier.y += soldier.yVelocity;
+
+            if (soldier.y >= soldier.groundY) {
+                soldier.y = soldier.groundY;
+                soldier.isJumping = false;
+                soldier.yVelocity = 0;
+            }
+        }
+        drawSoldier();
+        if (gapLength > 0) {
+            gapLength -= gameSpeed;
+        } else {
+            obstacleTimer += gameSpeed;
+            if (obstacleTimer > OBSTACLE_INTERVAL + Math.random() * 800) { 
+                createObstacle();
+                obstacleTimer = 0;
+            }
+        }
+        for (let i = 0; i < obstacles.length; i++) {
+            let obs = obstacles[i];
+            obs.x -= gameSpeed;
+            drawObstacle(obs);
+            if (
+                soldier.x < obs.x + obs.width &&
+                soldier.x + soldier.width > obs.x &&
+                soldier.y < obs.y + obs.height &&
+                soldier.y + soldier.height > obs.y
+            ) {
+                if (obs.type !== 'star') { 
+                    
+                    gameOver();
+                    return;
+                } else if (obs.type === 'star') {
+                    
+                    score += 50; 
+                    obstacles.splice(i, 1); 
+                    i--;
+                }
+            }
+            if (obs.x < -obs.width) {
+                obstacles.splice(i, 1);
+                i--;
+                if (obs.type !== 'star') { 
+                    score += 10;
+                }
+            }
+        }
+        scoreDisplay.textContent = score;
+        gameSpeed += 0.005; 
+
+        animationFrameId = requestAnimationFrame(update);
+    }
+    function createObstacle() {
+        let obsType;
+        do {
+            const randomIndex = Math.floor(Math.random() * OBSTACLE_TYPES.length);
+            obsType = OBSTACLE_TYPES[randomIndex];
+        } while (obsType === lastObstacleType && Math.random() < 0.3); 
+
+        lastObstacleType = obsType;
+
+        let obs = {
+            x: canvas.width,
+            width: 0,
+            height: 0,
+            type: obsType
+        };
+
+        if (obsType === 'ground') {
+            obs.width = 30 + Math.random() * 20;
+            obs.height = MIN_OBSTACLE_HEIGHT + Math.random() * (MAX_OBSTACLE_HEIGHT - MIN_OBSTACLE_HEIGHT);
+            obs.y = soldier.groundY + soldier.height - obs.height;
+            gapLength = minGap + Math.random() * (maxGap - minGap);
+
+        } else if (obsType === 'air') {
+            obs.width = 100; 
+            obs.height = 30; 
+            const minHeightAboveSoldier = 10; 
+            const maxHeightAboveGround = 150; 
+            const minY = soldier.groundY + soldier.height - obs.height - maxHeightAboveGround;
+            const maxY = soldier.y - obs.height - minHeightAboveSoldier; 
+            obs.y = Math.random() * (maxY - minY) + minY; 
+            gapLength = minGap + Math.random() * (maxGap - minGap);    
+        } else if (obsType === 'large_rock') {
+            
+            obs.width = 45; 
+            obs.height = 80; 
+            obs.y = soldier.groundY + soldier.height - obs.height;
+            gapLength = minGap + Math.random() * (maxGap - minGap);
+
+        } else if (obsType === 'star') {
+            
+            obs.width = 40; 
+            obs.height = 40; 
+            obs.y = soldier.groundY - 50 - Math.random() * 50; 
+            
+            gapLength = 100 + Math.random() * 150; 
+        }
+        
+        obstacles.push(obs);
+    }
+
+    function jump() {
+        if (!soldier.isJumping) {
+            soldier.isJumping = true;
+            soldier.yVelocity = -soldier.jumpStrength;
+        }
+    }
+    
+    function startGame() {
+        
+        setupCanvasDimensions(); 
+        
+        soldier.y = soldier.groundY;
+        soldier.isJumping = false;
+        soldier.yVelocity = 0;
+        obstacles = [];
+        score = 0;
+        gameSpeed = 5;
+        isRunning = true;
+        obstacleTimer = 0;
+        gapLength = 0; 
+        
+        
+        currentWinningScore = Math.floor(Math.random() * (MAX_WINNING_SCORE - MIN_WINNING_SCORE + 1)) + MIN_WINNING_SCORE;
+
+        
+        scoreDisplay.textContent = 0;
+        gameOverScreen.style.display = 'none';
+        winScreen.style.display = 'none';
+        
+        try {
+            bgMusic.currentTime = 0;
+            bgMusic.volume = 0.5;
+            bgMusic.play();
+        } catch (e) {
+            console.log("Không thể tự động phát nhạc. Vui lòng tương tác với trình duyệt.");
+        }
+        
+        
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+        }
+        update();
+    }
+
+    function gameOver() {
+        isRunning = false;
+        cancelAnimationFrame(animationFrameId);
+        bgMusic.pause();
+        
+        gameOverMessage.innerHTML = `
+        <h2>NHIỆM VỤ THẤT BẠI!</h2>
+        <p>Chú Bộ Đội đã vấp phải chướng ngại vật.</p>
+        <p>Điểm đạt được: <strong>${score}</strong></p>
+        <p>Cố gắng đạt ${currentWinningScore} điểm để gặp Bác Hồ nhé!</p> `;
+        gameOverScreen.style.display = 'flex';
+    }
+
+    function winGame() {
+        isRunning = false;
+        cancelAnimationFrame(animationFrameId);
+        bgMusic.pause();
+
+        winMessage.innerHTML = `
+            <h2>CHÚC MỪNG CHIẾN THẮNG!</h2>
+            <p>Chú Bộ Đội đã hoàn thành xuất sắc nhiệm vụ, vượt qua mọi gian nan và đã gặp được Bác Hồ!</p>
+            <p>Điểm cuối cùng: <strong>${score}</strong></p>
+            <p>Hãy chơi lại để tiếp tục hành trình phụng sự Tổ quốc!</p>
+        `;
+        winScreen.style.display = 'flex';
+    }
+
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            if (!isRunning && (gameOverScreen.style.display === 'flex' || winScreen.style.display === 'flex')) {
+                
+                startGame();
+            } else if (isRunning) {
+                jump();
+            }
+        }
+    });
+    
+    window.addEventListener('resize', () => {
+        if (!isRunning) {
+            setupCanvasDimensions();
+            drawBackground();
+            drawSoldier();
+        }
+    });
+
+    
+    loadResources().then(() => {
+        
+        setupCanvasDimensions(); 
+        
+        currentWinningScore = Math.floor(Math.random() * (MAX_WINNING_SCORE - MIN_WINNING_SCORE + 1)) + MIN_WINNING_SCORE;
+        
+        drawBackground();
+        drawSoldier();
+        gameOverMessage.innerHTML = `
+            <h2>TRÒ CHƠI CHÚ BỘ ĐỘI</h2>
+            <p>Vượt qua núi rừng, né tránh chướng ngại vật, thu thập **Ngôi Sao** để tăng điểm, tìm gặp Bác Hồ.</p>
+            <p>Cố gắng đạt <strong>${currentWinningScore}</strong> điểm để chiến thắng!</p> <p>Nhấn **Chơi Lại** hoặc **Space** để bắt đầu!</p>
+        `;
+        gameOverScreen.style.display = 'flex'; 
+    });
+
+</script>
+</body>
+</html>
